@@ -91,13 +91,45 @@ class ReforgesDisplay(private val plugin: ReforgesPlugin) : DisplayModule(plugin
 
         if (reforge != null) {
             if (plugin.configYml.getBool("reforge.display-in-lore")) {
-                val addLore: MutableList<String> = ArrayList()
-                for (string in plugin.configYml.getFormattedStrings("reforge.reforged-prefix")) {
-                    addLore.add(Display.PREFIX + string.replace("%reforge%", reforge.name))
+                // 1) Construit proprement la section reforge (un seul Display.PREFIX par ligne)
+                val header = plugin.configYml
+                    .getFormattedStrings("reforge.reforged-prefix")
+                    .map { it.replace("%reforge%", reforge.name) }
+                    .map { "${Display.PREFIX}$it" }
+
+                val desc = reforge.description
+                    .formatEco(context)
+                    .map { "${Display.PREFIX}$it" }
+
+                val addLore = ArrayList<String>(header.size + desc.size).apply {
+                    addAll(header)
+                    addAll(desc)
                 }
-                addLore.addAll(reforge.description.formatEco(context))
-                addLore.replaceAll { "${Display.PREFIX}$it" }
-                lore.addAll(addLore)
+
+                // 2) Construit (optionnel) le bloc "conditions non remplies" à coller juste après la reforge
+                val conditions: List<String> = if (player != null) {
+                    val provided = ItemProvidedHolder(reforge, itemStack)
+                    val lines = provided.getNotMetLines(player)
+                    if (lines.isNotEmpty()) {
+                        buildList {
+                            add(Display.PREFIX) // séparateur visuel
+                            addAll(lines.map { "${Display.PREFIX}$it" })
+                        }
+                    } else {
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+
+                // 3) Insertion juste avant les 3 dernières lignes (souvent la rareté)
+                val keepBottom = 3
+                val insertionIndex = (lore.size - keepBottom).coerceAtLeast(0)
+
+                lore.addAll(insertionIndex, addLore)
+                if (conditions.isNotEmpty()) {
+                    lore.addAll(insertionIndex + addLore.size, conditions)
+                }
             }
 
             if (plugin.configYml.getBool("reforge.display-in-name")) {
@@ -116,17 +148,10 @@ class ReforgesDisplay(private val plugin: ReforgesPlugin) : DisplayModule(plugin
                 }
             }
 
-
-            if (player != null) {
-                val provided = ItemProvidedHolder(reforge, itemStack)
-
-                val lines = provided.getNotMetLines(player).map { Display.PREFIX + it }
-
-                if (lines.isNotEmpty()) {
-                    lore.add(Display.PREFIX)
-                    lore.addAll(lines)
-                }
-            }
+            // NOTE: Les conditions manquantes sont déjà gérées dans le bloc ci-dessus
+            // pour qu'elles s'insèrent au bon endroit (juste après la reforge et avant la rareté).
+            // Si on voulait conserver l'ancien comportement (à la toute fin), il suffirait
+            // de déplacer ce bloc hors de "display-in-lore" et de l'ajouter à la fin.
         }
 
         fastItemStack.lore = lore
